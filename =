@@ -1,0 +1,6 @@
+python-build: use openssl@1.1 from homebrew
+python-build: use readline from homebrew
+python-build: use tcl-tk from homebrew
+python-build: use readline from homebrew
+python-build: use ncurses from homebrew
+python-build: use zlib from xcode sdk
