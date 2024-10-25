@@ -11,6 +11,9 @@ It analyzes commit patterns to estimate work hours and productivity for contribu
 import git
 import datetime
 from collections import defaultdict
+import matplotlib.pyplot as plt
+import seaborn as sns
+import pandas as pd
 
 def get_repo(repo_path):
     """
@@ -147,6 +150,121 @@ def calculate_active_work_time(contributor_commits, time_threshold_hours=4):
         active_work_time[contributor] = total_time.total_seconds() / 3600.0  # Convert to hours
     return active_work_time
 
+def generate_heatmap_data(commit_data):
+    """
+    Generate data for heatmap visualization.
+
+    Args:
+        commit_data (list of dict): List of commit data dictionaries.
+
+    Returns:
+        pandas.DataFrame: DataFrame suitable for heatmap generation.
+    """
+    data = []
+    for commit in commit_data:
+        timestamp = commit['timestamp']
+        day_of_week = timestamp.weekday()  # Monday is 0 and Sunday is 6
+        hour = timestamp.hour
+        data.append({'day_of_week': day_of_week, 'hour': hour})
+
+    df = pd.DataFrame(data)
+    heatmap_data = df.groupby(['day_of_week', 'hour']).size().unstack(fill_value=0)
+    return heatmap_data
+
+def plot_heatmap(heatmap_data, contributor=None):
+    """
+    Plot heatmap of commit activity.
+
+    Args:
+        heatmap_data (pandas.DataFrame): DataFrame containing heatmap data.
+        contributor (str, optional): Name of the contributor. Defaults to None.
+    """
+    plt.figure(figsize=(12, 6))
+    sns.heatmap(heatmap_data, cmap='YlOrRd')
+    plt.title(f'Commit Activity Heatmap {"for " + contributor if contributor else ""}')
+    plt.xlabel('Hour of Day')
+    plt.ylabel('Day of Week')
+    plt.yticks(ticks=[0,1,2,3,4,5,6], labels=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], rotation=0)
+    plt.show()
+
+def identify_productivity_patterns(contributor_commits):
+    """
+    Identify productivity patterns for each contributor.
+
+    Args:
+        contributor_commits (dict): Dictionary with contributor as key and list of commits as value.
+
+    Returns:
+        dict: Dictionary with contributor as key and productivity patterns as value.
+    """
+    patterns = {}
+    for contributor, commits in contributor_commits.items():
+        data = []
+        for commit in commits:
+            timestamp = commit['timestamp']
+            day_of_week = timestamp.weekday()
+            hour = timestamp.hour
+            data.append({'day_of_week': day_of_week, 'hour': hour})
+        df = pd.DataFrame(data)
+        patterns[contributor] = df
+    return patterns
+
+def plot_contributor_heatmaps(patterns):
+    """
+    Plot heatmaps for each contributor.
+
+    Args:
+        patterns (dict): Dictionary with contributor as key and DataFrame of commit times as value.
+    """
+    for contributor, df in patterns.items():
+        heatmap_data = df.groupby(['day_of_week', 'hour']).size().unstack(fill_value=0)
+        plot_heatmap(heatmap_data, contributor=contributor)
+
+def generate_trend_analysis(commit_data):
+    """
+    Generate trend analysis data over time.
+
+    Args:
+        commit_data (list of dict): List of commit data dictionaries.
+
+    Returns:
+        pandas.DataFrame: DataFrame containing daily commit counts.
+    """
+    df = pd.DataFrame(commit_data)
+    df['date'] = df['timestamp'].dt.date
+    trend_data = df.groupby('date').size().reset_index(name='commit_count')
+    return trend_data
+
+def plot_trend_analysis(trend_data):
+    """
+    Plot trend analysis over time.
+
+    Args:
+        trend_data (pandas.DataFrame): DataFrame containing daily commit counts.
+    """
+    plt.figure(figsize=(12, 6))
+    plt.plot(trend_data['date'], trend_data['commit_count'], marker='o')
+    plt.title('Commit Activity Over Time')
+    plt.xlabel('Date')
+    plt.ylabel('Number of Commits')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+def generate_report(active_work_time, trend_data):
+    """
+    Generate a summary report of git-hours and productivity patterns.
+
+    Args:
+        active_work_time (dict): Dictionary with contributor as key and total active work time in hours.
+        trend_data (pandas.DataFrame): DataFrame containing daily commit counts.
+    """
+    print("\n=== Git Hours Report ===")
+    display_results(active_work_time)
+    print("\nOverall Commit Trend:")
+    print(trend_data.describe())
+    # More detailed report generation can be added here.
+
 def display_results(active_work_time):
     """
     Display the total active work hours per contributor.
@@ -161,7 +279,7 @@ def display_results(active_work_time):
 
 def main(repo_path):
     """
-    Main function to compute git-hours.
+    Main function to compute git-hours and perform advanced analysis.
 
     Args:
         repo_path (str): Path to the Git repository.
@@ -189,10 +307,20 @@ def main(repo_path):
 
     display_results(active_work_time)
 
+    print("Identifying productivity patterns...")
+    patterns = identify_productivity_patterns(contributor_commits)
+    plot_contributor_heatmaps(patterns)
+
+    print("Generating trend analysis...")
+    trend_data = generate_trend_analysis(commit_data)
+    plot_trend_analysis(trend_data)
+
+    print("Generating report...")
+    generate_report(active_work_time, trend_data)
+
 if __name__ == '__main__':
     import argparse
-    parser = argparse.ArgumentParser(description='Compute git-hours per contributor.')
+    parser = argparse.ArgumentParser(description='Compute git-hours per contributor and perform advanced analysis.')
     parser.add_argument('repo_path', help='Path to the Git repository.')
     args = parser.parse_args()
     main(args.repo_path)
-
