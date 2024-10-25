@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Emergent git auto timesheet
+# Emergent git auto timesheet v3
 # Created by: Ashwin Kochiyil Philips, Emergent Solutions
 # Date: 2024-10-25
 
@@ -8,22 +8,19 @@ This script provides functionality to generate an automated timesheet based on G
 It analyzes commit patterns to estimate work hours and productivity for contributors in a Git repository.
 """
 
+
 import git
 import datetime
 from collections import defaultdict
 import matplotlib.pyplot as plt
 import seaborn as sns
 import pandas as pd
+import os
 
+# F0: Atomic Operations
 def get_repo(repo_path):
     """
-    Initialize and return a Git repository object.
-
-    Args:
-        repo_path (str): Path to the Git repository.
-
-    Returns:
-        git.Repo: GitPython repository object.
+    F0: Initialize and return a Git repository object.
     """
     try:
         repo = git.Repo(repo_path)
@@ -32,45 +29,44 @@ def get_repo(repo_path):
         print(f"Error: {repo_path} is not a valid Git repository.")
         exit(1)
 
-def get_commits(repo):
+def get_commits(repo, branches=None):
     """
-    Retrieve all commits from the repository.
-
-    Args:
-        repo (git.Repo): GitPython repository object.
-
-    Returns:
-        list of git.Commit: List of commit objects.
+    F0: Retrieve all commits from the repository.
+    Optionally filter by branches.
     """
-    return list(repo.iter_commits())
+    commits = []
+    if branches:
+        for branch in branches:
+            commits.extend(repo.iter_commits(branch))
+    else:
+        commits = list(repo.iter_commits('--all'))
+    return commits
 
 def parse_commit(commit):
     """
-    Parse commit information.
-
-    Args:
-        commit (git.Commit): Commit object.
-
-    Returns:
-        dict: Dictionary containing commit data.
+    F0: Parse commit information.
     """
     return {
         'author': commit.author.name,
         'email': commit.author.email,
         'timestamp': datetime.datetime.fromtimestamp(commit.committed_date),
-        'message': commit.message,
-        'hexsha': commit.hexsha
+        'message': commit.message.strip(),
+        'hexsha': commit.hexsha,
+        'branch': get_commit_branch(commit),
     }
 
+def get_commit_branch(commit):
+    """
+    F0: Get the branch name for a commit.
+    """
+    # This is a complex operation; for simplicity, we'll set it to None
+    # as determining the branch from a commit is non-trivial in Git.
+    return None
+
+# F1: Simple Functions
 def extract_commit_info(commits):
     """
-    Extract information from a list of commits.
-
-    Args:
-        commits (list of git.Commit): List of commit objects.
-
-    Returns:
-        list of dict: List of commit data dictionaries.
+    F1: Extract information from a list of commits.
     """
     commit_data = []
     for commit in commits:
@@ -80,13 +76,7 @@ def extract_commit_info(commits):
 
 def filter_commits(commit_data):
     """
-    Filter out commits that do not contribute to meaningful time analysis.
-
-    Args:
-        commit_data (list of dict): List of commit data dictionaries.
-
-    Returns:
-        list of dict: Filtered list of commit data dictionaries.
+    F1: Filter out commits that do not contribute to meaningful time analysis.
     """
     filtered_commits = []
     for data in commit_data:
@@ -94,15 +84,10 @@ def filter_commits(commit_data):
             filtered_commits.append(data)
     return filtered_commits
 
+# F2: Aggregated Functions
 def group_commits_by_contributor(commit_data):
     """
-    Group commits by contributor.
-
-    Args:
-        commit_data (list of dict): List of commit data dictionaries.
-
-    Returns:
-        dict: Dictionary with contributor as key and list of commits as value.
+    F2: Group commits by contributor.
     """
     contributor_commits = defaultdict(list)
     for data in commit_data:
@@ -110,30 +95,28 @@ def group_commits_by_contributor(commit_data):
         contributor_commits[contributor].append(data)
     return contributor_commits
 
+def group_commits_by_branch(commit_data):
+    """
+    F2: Group commits by branch.
+    """
+    branch_commits = defaultdict(list)
+    for data in commit_data:
+        branch = data['branch'] if data['branch'] else 'Unknown'
+        branch_commits[branch].append(data)
+    return branch_commits
+
 def sort_commits_by_timestamp(contributor_commits):
     """
-    Sort commits by timestamp for each contributor.
-
-    Args:
-        contributor_commits (dict): Dictionary with contributor as key and list of commits as value.
-
-    Returns:
-        dict: Dictionary with contributor as key and sorted list of commits.
+    F2: Sort commits by timestamp for each contributor.
     """
     for contributor in contributor_commits:
         contributor_commits[contributor].sort(key=lambda x: x['timestamp'])
     return contributor_commits
 
+# F3: Higher-Level Analysis
 def calculate_active_work_time(contributor_commits, time_threshold_hours=4):
     """
-    Calculate active work time per contributor.
-
-    Args:
-        contributor_commits (dict): Dictionary with contributor as key and sorted list of commits.
-        time_threshold_hours (int, optional): Threshold in hours to define active work sessions.
-
-    Returns:
-        dict: Dictionary with contributor as key and total active work time in hours.
+    F3: Calculate active work time per contributor.
     """
     active_work_time = {}
     threshold = datetime.timedelta(hours=time_threshold_hours)
@@ -150,151 +133,110 @@ def calculate_active_work_time(contributor_commits, time_threshold_hours=4):
         active_work_time[contributor] = total_time.total_seconds() / 3600.0  # Convert to hours
     return active_work_time
 
-def generate_heatmap_data(commit_data):
+def split_time_periods(commit_data):
     """
-    Generate data for heatmap visualization.
-
-    Args:
-        commit_data (list of dict): List of commit data dictionaries.
-
-    Returns:
-        pandas.DataFrame: DataFrame suitable for heatmap generation.
+    F3: Split commit data into different time periods.
     """
-    data = []
-    for commit in commit_data:
-        timestamp = commit['timestamp']
-        day_of_week = timestamp.weekday()  # Monday is 0 and Sunday is 6
-        hour = timestamp.hour
-        data.append({'day_of_week': day_of_week, 'hour': hour})
+    periods = {'week': {}, 'month': {}, 'year': {}}
+    for data in commit_data:
+        timestamp = data['timestamp']
+        week = timestamp.isocalendar()[1]
+        month = timestamp.month
+        year = timestamp.year
 
-    df = pd.DataFrame(data)
-    heatmap_data = df.groupby(['day_of_week', 'hour']).size().unstack(fill_value=0)
-    return heatmap_data
+        key_week = f"{year}-W{week}"
+        key_month = f"{year}-M{month}"
+        key_year = f"{year}"
 
-def plot_heatmap(heatmap_data, contributor=None):
+        periods['week'].setdefault(key_week, []).append(data)
+        periods['month'].setdefault(key_month, []).append(data)
+        periods['year'].setdefault(key_year, []).append(data)
+    return periods
+
+def calculate_time_by_commit(contributor_commits, time_threshold_hours=4):
     """
-    Plot heatmap of commit activity.
-
-    Args:
-        heatmap_data (pandas.DataFrame): DataFrame containing heatmap data.
-        contributor (str, optional): Name of the contributor. Defaults to None.
+    F3: Calculate time spent between commits for each contributor.
     """
-    plt.figure(figsize=(12, 6))
-    sns.heatmap(heatmap_data, cmap='YlOrRd')
-    plt.title(f'Commit Activity Heatmap {"for " + contributor if contributor else ""}')
-    plt.xlabel('Hour of Day')
-    plt.ylabel('Day of Week')
-    plt.yticks(ticks=[0,1,2,3,4,5,6], labels=['Mon','Tue','Wed','Thu','Fri','Sat','Sun'], rotation=0)
-    plt.show()
-
-def identify_productivity_patterns(contributor_commits):
-    """
-    Identify productivity patterns for each contributor.
-
-    Args:
-        contributor_commits (dict): Dictionary with contributor as key and list of commits as value.
-
-    Returns:
-        dict: Dictionary with contributor as key and productivity patterns as value.
-    """
-    patterns = {}
+    commit_times = []
+    threshold = datetime.timedelta(hours=time_threshold_hours)
     for contributor, commits in contributor_commits.items():
-        data = []
-        for commit in commits:
-            timestamp = commit['timestamp']
-            day_of_week = timestamp.weekday()
-            hour = timestamp.hour
-            data.append({'day_of_week': day_of_week, 'hour': hour})
-        df = pd.DataFrame(data)
-        patterns[contributor] = df
-    return patterns
+        previous_time = None
+        previous_commit = None
+        for data in commits:
+            current_time = data['timestamp']
+            if previous_time is not None:
+                delta = current_time - previous_time
+                if delta <= threshold:
+                    commit_times.append({
+                        'contributor': contributor,
+                        'time_spent': delta.total_seconds() / 3600.0,
+                        'commit_message': previous_commit['message'],
+                        'timestamp': previous_commit['timestamp'],
+                    })
+            previous_time = current_time
+            previous_commit = data
+    # Sort by time_spent descending
+    commit_times.sort(key=lambda x: x['time_spent'], reverse=True)
+    return commit_times
 
-def plot_contributor_heatmaps(patterns):
+# F4: Complex Data Modeling
+def generate_timesheet(active_work_time, periods, commit_times):
     """
-    Plot heatmaps for each contributor.
-
-    Args:
-        patterns (dict): Dictionary with contributor as key and DataFrame of commit times as value.
+    F4: Generate timesheet data.
     """
-    for contributor, df in patterns.items():
-        heatmap_data = df.groupby(['day_of_week', 'hour']).size().unstack(fill_value=0)
-        plot_heatmap(heatmap_data, contributor=contributor)
+    timesheet_entries = []
+    for contributor, hours in active_work_time.items():
+        timesheet_entries.append({
+            'Contributor': contributor,
+            'Total Hours': round(hours, 2),
+        })
+    # Further processing for timesheet formats can be added here
+    return timesheet_entries
 
-def generate_trend_analysis(commit_data):
+def combine_repositories(repo_paths, branches=None):
     """
-    Generate trend analysis data over time.
-
-    Args:
-        commit_data (list of dict): List of commit data dictionaries.
-
-    Returns:
-        pandas.DataFrame: DataFrame containing daily commit counts.
+    F4: Combine commit data from multiple repositories.
     """
-    df = pd.DataFrame(commit_data)
-    df['date'] = df['timestamp'].dt.date
-    trend_data = df.groupby('date').size().reset_index(name='commit_count')
-    return trend_data
+    combined_commits = []
+    for repo_path in repo_paths:
+        repo = get_repo(repo_path)
+        commits = get_commits(repo, branches)
+        commit_data = extract_commit_info(commits)
+        filtered_data = filter_commits(commit_data)
+        combined_commits.extend(filtered_data)
+    return combined_commits
 
-def plot_trend_analysis(trend_data):
+# F5+: Advanced Insights
+def display_results(active_work_time, commit_times):
     """
-    Plot trend analysis over time.
-
-    Args:
-        trend_data (pandas.DataFrame): DataFrame containing daily commit counts.
+    F5+: Display the total active work hours per contributor and time by commit.
     """
-    plt.figure(figsize=(12, 6))
-    plt.plot(trend_data['date'], trend_data['commit_count'], marker='o')
-    plt.title('Commit Activity Over Time')
-    plt.xlabel('Date')
-    plt.ylabel('Number of Commits')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.show()
-
-def generate_report(active_work_time, trend_data):
-    """
-    Generate a summary report of git-hours and productivity patterns.
-
-    Args:
-        active_work_time (dict): Dictionary with contributor as key and total active work time in hours.
-        trend_data (pandas.DataFrame): DataFrame containing daily commit counts.
-    """
-    print("\n=== Git Hours Report ===")
-    display_results(active_work_time)
-    print("\nOverall Commit Trend:")
-    print(trend_data.describe())
-    # More detailed report generation can be added here.
-
-def display_results(active_work_time):
-    """
-    Display the total active work hours per contributor.
-
-    Args:
-        active_work_time (dict): Dictionary with contributor as key and total active work time in hours.
-    """
-    print("\nTotal Active Work Hours per Contributor:")
-    print("---------------------------------------")
+    total_hours = sum(active_work_time.values())
+    print("\nTotal Active Work Hours: {:.2f} hours".format(total_hours))
+    print("\nHours per Contributor:")
+    print("----------------------")
     for contributor, hours in active_work_time.items():
         print(f"{contributor}: {hours:.2f} hours")
 
-def main(repo_path):
+    print("\nTime by Commit (Most Time at Top):")
+    print("---------------------------------")
+    for entry in commit_times[:10]:  # Show top 10
+        print(f"{entry['contributor']} spent {entry['time_spent']:.2f} hours on commit '{entry['commit_message']}' at {entry['timestamp']}")
+
+def output_timesheet(timesheet_entries):
+    """
+    F5+: Output timesheet in standard agency format.
+    """
+    df = pd.DataFrame(timesheet_entries)
+    df.to_csv('timesheet.csv', index=False)
+    print("\nTimesheet saved to 'timesheet.csv'.")
+
+def main(repo_paths, branches=None):
     """
     Main function to compute git-hours and perform advanced analysis.
-
-    Args:
-        repo_path (str): Path to the Git repository.
     """
-    print("Initializing repository...")
-    repo = get_repo(repo_path)
-
-    print("Retrieving commits...")
-    commits = get_commits(repo)
-
-    print("Extracting commit information...")
-    commit_data = extract_commit_info(commits)
-
-    print("Filtering commits...")
-    commit_data = filter_commits(commit_data)
+    print("Combining repositories...")
+    commit_data = combine_repositories(repo_paths, branches)
 
     print("Grouping commits by contributor...")
     contributor_commits = group_commits_by_contributor(commit_data)
@@ -305,22 +247,24 @@ def main(repo_path):
     print("Calculating active work time...")
     active_work_time = calculate_active_work_time(contributor_commits)
 
-    display_results(active_work_time)
+    print("Splitting time periods...")
+    periods = split_time_periods(commit_data)
 
-    print("Identifying productivity patterns...")
-    patterns = identify_productivity_patterns(contributor_commits)
-    plot_contributor_heatmaps(patterns)
+    print("Calculating time by commit...")
+    commit_times = calculate_time_by_commit(contributor_commits)
 
-    print("Generating trend analysis...")
-    trend_data = generate_trend_analysis(commit_data)
-    plot_trend_analysis(trend_data)
+    display_results(active_work_time, commit_times)
 
-    print("Generating report...")
-    generate_report(active_work_time, trend_data)
+    print("Generating timesheet...")
+    timesheet_entries = generate_timesheet(active_work_time, periods, commit_times)
+    output_timesheet(timesheet_entries)
+
+    # Additional functionalities like hours by branch can be added here.
 
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser(description='Compute git-hours per contributor and perform advanced analysis.')
-    parser.add_argument('repo_path', help='Path to the Git repository.')
+    parser.add_argument('repo_paths', nargs='+', help='Paths to the Git repositories.')
+    parser.add_argument('--branches', nargs='*', help='Specific branches to analyze.')
     args = parser.parse_args()
-    main(args.repo_path)
+    main(args.repo_paths, args.branches)
